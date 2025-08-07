@@ -1,0 +1,27 @@
+📁 فایل‌های ضروری Master Bot:
+
+🔧 فایل‌های اصلی:
+├── master_bot.py          # ربات اصلی (44KB)
+├── database.py            # پایگاه داده (23KB) 
+├── config.py              # تنظیمات (3.7KB)
+├── payment.py             # سیستم پرداخت (17KB)
+├── admin.py               # پنل ادمین (27KB)
+├── deployment.py          # سیستم استقرار (13KB)
+├── discount.py            # کدهای تخفیف (11KB)
+├── referral_system.py     # سیستم ارجاع (14KB)
+├── trial_system.py        # تست رایگان (16KB)
+└── renewal_system.py      # تمدید خودکار (13KB)
+
+🔧 فایل‌های کمکی:
+├── start_master_bot.py    # اسکریپت راه‌اندازی
+├── test_system.py         # تست سیستم
+├── setup_payment_methods.py # راه‌اندازی پرداخت
+└── install.sh             # اسکریپت نصب
+
+📄 فایل‌های تنظیمات:
+├── requirements.txt       # وابستگی‌ها
+├── .env.example          # نمونه تنظیمات
+├── README.md             # راهنما
+└── INSTALL_GUIDE.md      # راهنمای نصب
+
+📊 مجموع: 15 فایل، حدود 200KB
