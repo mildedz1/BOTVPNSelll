@@ -1,0 +1,26 @@
+# Core Telegram Bot Framework
+python-telegram-bot>=20.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# Data Validation
+pydantic>=2.0.0
+
+# Rate Limiting (optional but recommended)
+slowapi>=0.1.9
+
+# Async Support
+aiohttp>=3.8.0
+asyncio-throttle>=1.0.2
+
+# Utilities
+uuid
+
+# Development Dependencies (optional)
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
