@@ -13,6 +13,7 @@ from telegram.constants import ParseMode
 from config import config, States
 from database import execute_db, query_db, customer_repo, subscription_repo
 from payment import payment_service
+from discount import discount_manager, broadcast_manager, notes_manager
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,10 @@ class AdminHandlers:
             [
                 InlineKeyboardButton("✅ تایید پرداخت‌ها", callback_data="admin_verify_payments"),
                 InlineKeyboardButton("📊 گزارشات", callback_data="admin_reports")
+            ],
+            [
+                InlineKeyboardButton("🎁 مدیریت کدهای تخفیف", callback_data="admin_discount_codes"),
+                InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast")
             ],
             [
                 InlineKeyboardButton("👥 مدیریت مشتریان", callback_data="admin_customers"),
@@ -547,6 +552,83 @@ class AdminHandlers:
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN
         )
+    
+    @staticmethod
+    async def manage_discount_codes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manage discount codes"""
+        query = update.callback_query
+        await query.answer()
+        
+        discount_codes = discount_manager.get_discount_codes(active_only=False)
+        
+        text = "🎁 **مدیریت کدهای تخفیف**\n\n"
+        keyboard = []
+        
+        if discount_codes:
+            for code in discount_codes[:10]:  # Show max 10
+                status_emoji = "✅" if code['is_active'] else "❌"
+                usage_text = f"{code['used_count']}"
+                if code['max_uses'] > 0:
+                    usage_text += f"/{code['max_uses']}"
+                
+                discount_text = f"{code['discount_percent']}%" if code['discount_percent'] > 0 else f"{code['discount_amount']:,}T"
+                
+                text += f"{status_emoji} **{code['code']}**\n"
+                text += f"   💸 تخفیف: {discount_text}\n"
+                text += f"   📊 استفاده: {usage_text}\n"
+                text += f"   🎯 برای: {code['valid_for']}\n\n"
+                
+                keyboard.append([
+                    InlineKeyboardButton(f"ویرایش {code['code']}", callback_data=f"edit_discount_{code['id']}")
+                ])
+        else:
+            text += "📭 هیچ کد تخفیفی تعریف نشده است.\n\n"
+        
+        keyboard.extend([
+            [InlineKeyboardButton("➕ ایجاد کد تخفیف جدید", callback_data="create_discount_code")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
+        ])
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    @staticmethod
+    async def broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Broadcast message menu"""
+        query = update.callback_query
+        await query.answer()
+        
+        # Get customer counts
+        all_customers = len(broadcast_manager.get_all_customers())
+        active_subs = len(broadcast_manager.get_customers_with_active_subscriptions())
+        expired_subs = len(broadcast_manager.get_customers_with_expired_subscriptions())
+        
+        text = f"""
+📢 **پیام همگانی**
+
+👥 **آمار مخاطبان:**
+• همه مشتریان: {all_customers:,} نفر
+• اشتراک فعال: {active_subs:,} نفر  
+• اشتراک منقضی: {expired_subs:,} نفر
+
+لطفا گروه مخاطب مورد نظر را انتخاب کنید:
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton(f"👥 همه مشتریان ({all_customers})", callback_data="broadcast_all")],
+            [InlineKeyboardButton(f"✅ اشتراک فعال ({active_subs})", callback_data="broadcast_active")],
+            [InlineKeyboardButton(f"⏰ اشتراک منقضی ({expired_subs})", callback_data="broadcast_expired")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
+        ]
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 # Admin callback handlers mapping
 ADMIN_CALLBACKS = {
@@ -556,6 +638,8 @@ ADMIN_CALLBACKS = {
     'admin_payment_settings': AdminHandlers.payment_settings,
     'admin_dollar_price': AdminHandlers.set_dollar_price,
     'admin_verify_payments': AdminHandlers.verify_payments,
+    'admin_discount_codes': AdminHandlers.manage_discount_codes,
+    'admin_broadcast': AdminHandlers.broadcast_menu,
     'toggle_aqay': AdminHandlers.toggle_payment_method,
     'toggle_card_to_card': AdminHandlers.toggle_payment_method,
     'toggle_crypto': AdminHandlers.toggle_payment_method,

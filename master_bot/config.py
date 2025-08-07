@@ -109,7 +109,10 @@ class States:
         
         # Transaction Screenshot States
         AWAIT_TRANSACTION_SCREENSHOT,
-    ) = range(17)
+        
+        # Discount Code States
+        AWAIT_DISCOUNT_CODE,
+    ) = range(18)
 
 # Initialize configuration
 config = MasterConfig()

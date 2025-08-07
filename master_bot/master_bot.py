@@ -21,6 +21,7 @@ from database import customer_repo, subscription_repo, query_db, execute_db
 from deployment import deployment_service
 from payment import payment_service
 from admin import AdminHandlers, get_admin_callback_handler
+from discount import discount_manager
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -300,6 +301,8 @@ class MasterBotHandlers:
                 )
             ])
         
+        # Add discount code option
+        keyboard.append([InlineKeyboardButton("🎁 کد تخفیف دارم", callback_data="apply_discount")])
         keyboard.append([InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")])
         
         await update.message.reply_text(
@@ -340,10 +343,13 @@ class MasterBotHandlers:
             await query.edit_message_text("❌ خطا در شناسایی کاربر.")
             return ConversationHandler.END
         
+        # Get final amount (considering discount)
+        final_amount = context.user_data.get('final_price', context.user_data['purchase_price'])
+        
         # Create payment
         payment_data = {
             'customer_id': customer['id'],
-            'amount': context.user_data['purchase_price'],
+            'amount': final_amount,
             'method': payment_method,
             'description': f"خرید ربات VPN - پلن {context.user_data['purchase_plan']}"
         }
@@ -395,6 +401,10 @@ class MasterBotHandlers:
                 card_text += f"\n📋 **توضیحات:** {payment_info['instructions']}"
             
             keyboard = [
+                [
+                    InlineKeyboardButton("📋 کپی مبلغ", callback_data=f"copy_amount_{payment_info['amount']}"),
+                    InlineKeyboardButton("💳 کپی کارت", callback_data=f"copy_card_{payment_info['card_number'].replace('-', '')}")
+                ],
                 [InlineKeyboardButton("✅ واریز کردم", callback_data="upload_screenshot")],
                 [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
             ]
@@ -625,6 +635,152 @@ class MasterBotHandlers:
         # Clear user data
         context.user_data.clear()
         return States.MAIN_MENU
+    
+    @staticmethod
+    async def request_discount_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Request discount code from user"""
+        query = update.callback_query
+        await query.answer()
+        
+        discount_text = """
+🎁 **کد تخفیف**
+
+لطفا کد تخفیف خود را وارد کنید:
+
+💡 **نکات:**
+• کد تخفیف حساس به حروف بزرگ و کوچک نیست
+• هر کد تخفیف فقط یک بار قابل استفاده است
+• برخی کدها حداقل مبلغ خرید دارند
+
+مثال: `WELCOME20` یا `SAVE50K`
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 بازگشت به پرداخت", callback_data="back_to_payment")],
+            [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
+        ]
+        
+        await query.edit_message_text(
+            discount_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        return States.AWAIT_DISCOUNT_CODE
+    
+    @staticmethod
+    async def process_discount_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Process discount code"""
+        user = update.effective_user
+        discount_code = update.message.text.strip()
+        
+        # Get customer and current purchase info
+        customer = customer_repo.get_customer(user.id)
+        original_price = context.user_data.get('purchase_price', 0)
+        
+        if not customer or not original_price:
+            await update.message.reply_text("❌ خطا در اطلاعات خرید.")
+            return ConversationHandler.END
+        
+        # Validate discount code
+        is_valid, message, discount_info = discount_manager.validate_discount_code(
+            discount_code, customer['id'], original_price, 'purchase'
+        )
+        
+        if not is_valid:
+            await update.message.reply_text(
+                f"❌ {message}\n\nلطفا کد تخفیف صحیح وارد کنید یا بازگشت به پرداخت را انتخاب کنید.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 بازگشت به پرداخت", callback_data="back_to_payment")],
+                    [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
+                ])
+            )
+            return States.AWAIT_DISCOUNT_CODE
+        
+        # Calculate discount
+        discount_amount = discount_manager.calculate_discount(discount_info, original_price)
+        final_price = original_price - discount_amount
+        
+        # Store discount info
+        context.user_data['discount_code'] = discount_code
+        context.user_data['discount_info'] = discount_info
+        context.user_data['discount_amount'] = discount_amount
+        context.user_data['final_price'] = final_price
+        
+        # Show discount applied message
+        plan_type = context.user_data.get('purchase_plan')
+        bot_username = context.user_data.get('bot_username')
+        
+        channel_info = ""
+        if context.user_data.get('channel_username'):
+            channel_info = f"\n🔗 **کانال اجباری:** {context.user_data['channel_username']}"
+        
+        discount_text = f"""
+✅ **کد تخفیف اعمال شد!**
+
+📋 **خلاصه سفارش**
+🤖 **ربات:** @{bot_username}
+📦 **پلن:** {"ماهانه" if plan_type == "monthly" else "سالانه"}
+
+💰 **قیمت اصلی:** {original_price:,} تومان
+🎁 **کد تخفیف:** {discount_code}
+💸 **تخفیف:** {discount_amount:,} تومان
+💳 **مبلغ نهایی:** {final_price:,} تومان{channel_info}
+
+🎉 شما {discount_amount:,} تومان صرفه‌جویی کردید!
+
+💳 **انتخاب روش پرداخت:**
+"""
+        
+        # Get available payment methods
+        payment_methods = payment_service.get_available_payment_methods()
+        keyboard = []
+        
+        for method_key, method_info in payment_methods.items():
+            instant_text = " (فوری)" if method_info['instant'] else " (دستی)"
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{method_info['icon']} {method_info['name']}{instant_text}",
+                    callback_data=f"pay_with_{method_key}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")])
+        
+        await update.message.reply_text(
+            discount_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        return States.AWAIT_PAYMENT
+    
+    @staticmethod
+    async def back_to_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Go back to payment selection"""
+        return await MasterBotHandlers.show_payment_summary(update, context)
+    
+    @staticmethod
+    async def handle_copy_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle copy amount and card number buttons"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data.startswith("copy_amount_"):
+            amount = query.data.replace("copy_amount_", "")
+            await query.answer(
+                f"💰 مبلغ کپی شد: {amount}",
+                show_alert=True
+            )
+            
+        elif query.data.startswith("copy_card_"):
+            card_number = query.data.replace("copy_card_", "")
+            # Format card number with dashes for better readability
+            formatted_card = f"{card_number[:4]}-{card_number[4:8]}-{card_number[8:12]}-{card_number[12:]}"
+            await query.answer(
+                f"💳 شماره کارت کپی شد: {formatted_card}",
+                show_alert=True
+            )
     
     @staticmethod
     async def verify_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -862,6 +1018,11 @@ def create_master_bot_application() -> Application:
             States.AWAIT_TRANSACTION_SCREENSHOT: [
                 MessageHandler(filters.PHOTO | filters.Document.IMAGE, MasterBotHandlers.receive_screenshot),
                 CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^cancel_purchase$')
+            ],
+            States.AWAIT_DISCOUNT_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, MasterBotHandlers.process_discount_code),
+                CallbackQueryHandler(MasterBotHandlers.back_to_payment, pattern=r'^back_to_payment$'),
+                CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^cancel_purchase$')
             ]
         },
         fallbacks=[CommandHandler('start', MasterBotHandlers.start_command)]
@@ -875,6 +1036,8 @@ def create_master_bot_application() -> Application:
     # Callback handlers
     application.add_handler(CallbackQueryHandler(MasterBotHandlers.show_pricing, pattern=r'^pricing$'))
     application.add_handler(CallbackQueryHandler(MasterBotHandlers.my_bots, pattern=r'^my_bots$'))
+    application.add_handler(CallbackQueryHandler(MasterBotHandlers.request_discount_code, pattern=r'^apply_discount$'))
+    application.add_handler(CallbackQueryHandler(MasterBotHandlers.handle_copy_buttons, pattern=r'^copy_'))
     
     # Admin callback handlers
     def admin_callback_router(update, context):

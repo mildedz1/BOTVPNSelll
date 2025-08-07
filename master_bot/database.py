@@ -171,6 +171,54 @@ class MasterDatabase:
                 )
             """)
             
+            # Discount codes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discount_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT UNIQUE NOT NULL,
+                    discount_percent INTEGER NOT NULL,
+                    discount_amount INTEGER DEFAULT 0,
+                    max_uses INTEGER DEFAULT -1,
+                    used_count INTEGER DEFAULT 0,
+                    valid_for TEXT DEFAULT 'both' CHECK(valid_for IN ('purchase', 'renewal', 'both')),
+                    min_amount INTEGER DEFAULT 0,
+                    expires_at TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_by INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES customers(id)
+                )
+            """)
+            
+            # Discount code usage table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discount_code_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    discount_code_id INTEGER NOT NULL,
+                    customer_id INTEGER NOT NULL,
+                    payment_id INTEGER,
+                    discount_amount INTEGER NOT NULL,
+                    used_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id),
+                    FOREIGN KEY (customer_id) REFERENCES customers(id),
+                    FOREIGN KEY (payment_id) REFERENCES payments(id)
+                )
+            """)
+            
+            # Customer notes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS customer_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    note TEXT NOT NULL,
+                    created_by INTEGER NOT NULL,
+                    is_important BOOLEAN DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id),
+                    FOREIGN KEY (created_by) REFERENCES customers(id)
+                )
+            """)
+            
             # Create indexes
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_customers_user_id ON customers(user_id)",
