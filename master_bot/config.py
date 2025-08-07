@@ -104,12 +104,22 @@ class States:
         SUPPORT_MENU,
         AWAIT_SUPPORT_MESSAGE,
         
+        cursor/check-what-this-is-313b
+  
+        # Admin States
+        ADMIN_SETTINGS,
+        
+        main
         # Transaction Screenshot States
         AWAIT_TRANSACTION_SCREENSHOT,
         
         # Discount Code States
         AWAIT_DISCOUNT_CODE,
+        cursor/check-what-this-is-313b
     ) = range(15)
+ 
+    ) = range(18)
+        main
 
 # Initialize configuration
 config = MasterConfig()
