@@ -132,16 +132,22 @@ class MasterDatabase:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bot_instances (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    subscription_id INTEGER NOT NULL,
+                    customer_id INTEGER NOT NULL,
+                    subscription_id INTEGER,
+                    bot_username TEXT NOT NULL,
                     container_id TEXT UNIQUE NOT NULL,
                     container_name TEXT NOT NULL,
                     port INTEGER,
+                    plan_type TEXT DEFAULT 'monthly' CHECK(plan_type IN ('monthly', 'yearly', 'trial')),
+                    trial_id INTEGER,
                     status TEXT DEFAULT 'running' CHECK(status IN ('running', 'stopped', 'error')),
                     last_check TEXT,
                     cpu_usage REAL,
                     memory_usage REAL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+                    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (trial_id) REFERENCES trial_accounts(id) ON DELETE CASCADE
                 )
             """)
             
@@ -302,18 +308,21 @@ class MasterDatabase:
                 )
             """)
             
-            # Enhanced subscription table
-            cursor.execute("""
-                ALTER TABLE subscriptions ADD COLUMN auto_renewal_enabled BOOLEAN DEFAULT 0
-            """)
+            # Enhanced subscription table - Add columns safely
+            try:
+                cursor.execute("ALTER TABLE subscriptions ADD COLUMN auto_renewal_enabled BOOLEAN DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
-            cursor.execute("""
-                ALTER TABLE subscriptions ADD COLUMN renewed_count INTEGER DEFAULT 0
-            """)
+            try:
+                cursor.execute("ALTER TABLE subscriptions ADD COLUMN renewed_count INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
-            cursor.execute("""
-                ALTER TABLE subscriptions ADD COLUMN trial_converted BOOLEAN DEFAULT 0
-            """)
+            try:
+                cursor.execute("ALTER TABLE subscriptions ADD COLUMN trial_converted BOOLEAN DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             # Create indexes
             indexes = [

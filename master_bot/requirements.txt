@@ -13,8 +13,4 @@ docker>=6.0.0
 # SSH for remote deployment
 paramiko>=3.0.0
 
-# Database
-sqlite3
-
-# Utilities
-uuid
+# Note: sqlite3 and uuid are built-in Python modules

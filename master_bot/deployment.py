@@ -278,6 +278,56 @@ class BotDeploymentService:
     def list_all_deployments(self) -> list:
         """List all VPN bot deployments"""
         return self.docker_manager.list_vpn_bot_containers()
+    
+    async def deploy_trial_bot(self, deployment_data: Dict) -> Dict:
+        """Deploy trial bot with limitations"""
+        try:
+            # Create trial subscription data
+            trial_subscription_data = {
+                'customer_id': deployment_data['customer_id'],
+                'bot_token': deployment_data['bot_username'] + '_trial_token',  # Mock token
+                'admin_id': deployment_data['admin_id'],
+                'channel_username': deployment_data.get('channel_username'),
+                'channel_id': 0,
+                'plan_type': 'trial',
+                'trial_id': deployment_data['trial_id'],
+                'traffic_limit': deployment_data['traffic_limit'],
+                'expires_at': deployment_data['expires_at']
+            }
+            
+            # Create container
+            container_id, bot_url, message = self.docker_manager.create_bot_container(trial_subscription_data)
+            
+            if not container_id:
+                return {'success': False, 'error': message}
+            
+            # Generate mock VPN username for trial
+            vpn_username = f"trial_{deployment_data['customer_id']}_{deployment_data['trial_id']}"
+            
+            # Store bot instance
+            from database import execute_db
+            bot_instance_id = execute_db("""
+                INSERT INTO bot_instances 
+                (customer_id, bot_username, container_id, container_name, status, plan_type, trial_id)
+                VALUES (?, ?, ?, ?, 'active', 'trial', ?)
+            """, (
+                deployment_data['customer_id'],
+                deployment_data['bot_username'],
+                container_id,
+                f"trial-bot-{deployment_data['customer_id']}-{deployment_data['trial_id']}",
+                deployment_data['trial_id']
+            ))
+            
+            return {
+                'success': True,
+                'bot_instance_id': bot_instance_id,
+                'vpn_username': vpn_username,
+                'container_id': container_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Trial bot deployment failed: {e}")
+            return {'success': False, 'error': str(e)}
 
 # Initialize deployment service
 deployment_service = BotDeploymentService()
