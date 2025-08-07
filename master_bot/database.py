@@ -219,6 +219,102 @@ class MasterDatabase:
                 )
             """)
             
+            # Referral system tables
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS referral_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    referral_code TEXT UNIQUE NOT NULL,
+                    total_referrals INTEGER DEFAULT 0,
+                    total_earnings INTEGER DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS referral_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    referrer_id INTEGER NOT NULL,
+                    referee_id INTEGER NOT NULL,
+                    referral_code TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'cancelled')),
+                    reward_amount INTEGER DEFAULT 0,
+                    purchase_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TEXT,
+                    FOREIGN KEY (referrer_id) REFERENCES customers(id),
+                    FOREIGN KEY (referee_id) REFERENCES customers(id),
+                    FOREIGN KEY (purchase_id) REFERENCES payments(id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS referral_wallet_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    transaction_type TEXT NOT NULL CHECK(transaction_type IN ('credit', 'debit')),
+                    amount INTEGER NOT NULL,
+                    description TEXT,
+                    related_customer_id INTEGER,
+                    related_purchase_id INTEGER,
+                    related_payout_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id),
+                    FOREIGN KEY (related_customer_id) REFERENCES customers(id),
+                    FOREIGN KEY (related_purchase_id) REFERENCES payments(id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS referral_payouts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    bank_account TEXT,
+                    bank_name TEXT,
+                    account_holder TEXT,
+                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'paid', 'rejected')),
+                    admin_notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TEXT,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id)
+                )
+            """)
+            
+            # Trial system tables
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trial_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    customer_id INTEGER NOT NULL,
+                    trial_days INTEGER DEFAULT 3,
+                    traffic_limit_gb INTEGER DEFAULT 10,
+                    bot_instance_id INTEGER,
+                    vpn_username TEXT,
+                    status TEXT DEFAULT 'active' CHECK(status IN ('active', 'expired', 'converted')),
+                    started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TEXT,
+                    converted_to_subscription_id INTEGER,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id),
+                    FOREIGN KEY (bot_instance_id) REFERENCES bot_instances(id),
+                    FOREIGN KEY (converted_to_subscription_id) REFERENCES subscriptions(id)
+                )
+            """)
+            
+            # Enhanced subscription table
+            cursor.execute("""
+                ALTER TABLE subscriptions ADD COLUMN auto_renewal_enabled BOOLEAN DEFAULT 0
+            """)
+            
+            cursor.execute("""
+                ALTER TABLE subscriptions ADD COLUMN renewed_count INTEGER DEFAULT 0
+            """)
+            
+            cursor.execute("""
+                ALTER TABLE subscriptions ADD COLUMN trial_converted BOOLEAN DEFAULT 0
+            """)
+            
             # Create indexes
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_customers_user_id ON customers(user_id)",
