@@ -104,15 +104,12 @@ class States:
         SUPPORT_MENU,
         AWAIT_SUPPORT_MESSAGE,
         
-        # Admin States
-        ADMIN_SETTINGS,
-        
         # Transaction Screenshot States
         AWAIT_TRANSACTION_SCREENSHOT,
         
         # Discount Code States
         AWAIT_DISCOUNT_CODE,
-    ) = range(18)
+    ) = range(15)
 
 # Initialize configuration
 config = MasterConfig()
