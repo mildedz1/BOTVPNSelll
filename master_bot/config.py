@@ -27,8 +27,16 @@ class MasterConfig:
     VPN_BOT_IMAGE = os.getenv("VPN_BOT_IMAGE", "vpn-bot:latest")
     
     # Payment Configuration
-    ZARINPAL_MERCHANT_ID = os.getenv("ZARINPAL_MERCHANT_ID", "")
-    IDPAY_API_KEY = os.getenv("IDPAY_API_KEY", "")
+    AQAY_API_KEY = os.getenv("AQAY_API_KEY", "")
+    AQAY_BASE_URL = os.getenv("AQAY_BASE_URL", "")
+    AQAY_ENABLED = os.getenv("AQAY_ENABLED", "true").lower() == "true"
+    
+    # Card to Card Configuration
+    CARD_TO_CARD_ENABLED = os.getenv("CARD_TO_CARD_ENABLED", "true").lower() == "true"
+    
+    # Crypto Configuration
+    CRYPTO_ENABLED = os.getenv("CRYPTO_ENABLED", "true").lower() == "true"
+    DEFAULT_DOLLAR_PRICE = float(os.getenv("DEFAULT_DOLLAR_PRICE", "50000"))
     
     # Pricing (تومان)
     MONTHLY_PRICE = int(os.getenv("MONTHLY_PRICE", "200000"))  # 200 هزار تومان
@@ -95,7 +103,10 @@ class States:
         # Support
         SUPPORT_MENU,
         AWAIT_SUPPORT_MESSAGE,
-    ) = range(15)
+        
+        # Admin States
+        ADMIN_SETTINGS,
+    ) = range(16)
 
 # Initialize configuration
 config = MasterConfig()

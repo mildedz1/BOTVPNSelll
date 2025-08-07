@@ -82,14 +82,47 @@ class MasterDatabase:
                     customer_id INTEGER NOT NULL,
                     subscription_id INTEGER,
                     amount INTEGER NOT NULL,
-                    payment_method TEXT DEFAULT 'zarinpal',
+                    payment_method TEXT DEFAULT 'aqay' CHECK(payment_method IN ('aqay', 'card_to_card', 'crypto')),
                     transaction_id TEXT,
                     authority TEXT,
                     status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'failed', 'refunded')),
                     payment_date TEXT,
+                    card_id INTEGER,
+                    wallet_id INTEGER,
+                    crypto_amount REAL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (customer_id) REFERENCES customers(id),
-                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+                    FOREIGN KEY (card_id) REFERENCES payment_cards(id),
+                    FOREIGN KEY (wallet_id) REFERENCES crypto_wallets(id)
+                )
+            """)
+            
+            # Payment Cards table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS payment_cards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    card_number TEXT NOT NULL,
+                    card_name TEXT NOT NULL,
+                    bank_name TEXT,
+                    instructions TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    priority INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Crypto Wallets table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS crypto_wallets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    wallet_address TEXT NOT NULL,
+                    crypto_type TEXT NOT NULL,
+                    network TEXT,
+                    instructions TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    priority INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             

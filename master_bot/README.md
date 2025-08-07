@@ -63,13 +63,19 @@ cp .env.example .env
 nano .env
 ```
 
-### 4. ساخت Docker Image برای VPN Bot
+### 4. راه‌اندازی روش‌های پرداخت
+```bash
+# اجرای اسکریپت تنظیمات اولیه
+python setup_payment_methods.py
+```
+
+### 5. ساخت Docker Image برای VPN Bot
 ```bash
 # ساخت image از ربات VPN
 docker build -f ../Dockerfile.vpn-bot -t vpn-bot:latest ..
 ```
 
-### 5. اجرای Master Bot
+### 6. اجرای Master Bot
 ```bash
 python master_bot.py
 ```
@@ -82,10 +88,11 @@ python master_bot.py
 MASTER_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 MASTER_ADMIN_ID=123456789
 
-# Payment Gateway
-ZARINPAL_MERCHANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-# یا
-IDPAY_API_KEY=your-idpay-api-key
+# Payment Methods
+AQAY_API_KEY=your-aqay-api-key
+CARD_TO_CARD_ENABLED=true
+CRYPTO_ENABLED=true
+DEFAULT_DOLLAR_PRICE=52000
 
 # Pricing (تومان)
 MONTHLY_PRICE=200000
@@ -95,17 +102,31 @@ YEARLY_PRICE=2000000
 SERVER_HOST=your-domain.com
 ```
 
-### تنظیم Payment Gateway
+### تنظیم روش‌های پرداخت
 
-#### زرین‌پال
-1. ثبت نام در [zarinpal.com](https://zarinpal.com)
-2. دریافت Merchant ID
-3. وارد کردن در `.env`
-
-#### آیدی‌پی  
-1. ثبت نام در [idpay.ir](https://idpay.ir)
+#### 🌐 درگاه آقای پرداخت
+1. ثبت نام در [aqayepardakht.ir](https://aqayepardakht.ir)
 2. دریافت API Key
-3. وارد کردن در `.env`
+3. وارد کردن در `.env`:
+```env
+AQAY_API_KEY=your-api-key
+AQAY_ENABLED=true
+```
+
+#### 💳 کارت به کارت
+1. فعال‌سازی در `.env`:
+```env
+CARD_TO_CARD_ENABLED=true
+```
+2. اضافه کردن کارت‌ها از طریق پنل ادمین یا setup script
+
+#### 🪙 رمز ارز
+1. فعال‌سازی در `.env`:
+```env
+CRYPTO_ENABLED=true
+DEFAULT_DOLLAR_PRICE=52000
+```
+2. اضافه کردن کیف پول‌ها از طریق پنل ادمین
 
 ## 📊 نحوه استفاده
 
@@ -119,12 +140,14 @@ SERVER_HOST=your-domain.com
 7. پرداخت آنلاین
 8. دریافت لینک ربات
 
-### برای مدیر
-- مشاهده آمار فروش
-- مدیریت مشتریان
-- کنترل رباتهای فعال
-- تنظیم قیمت‌ها
-- پشتیبانی
+### برای مدیر (دستور `/admin`)
+- 📊 مشاهده آمار فروش و درآمد
+- 💳 مدیریت کارت‌های بانکی
+- 🪙 مدیریت کیف پول‌های رمز ارز
+- 💵 تنظیم قیمت دلار
+- ✅ تایید پرداخت‌های دستی
+- 👥 مدیریت مشتریان
+- ⚙️ تنظیمات سیستم
 
 ## 🏗️ معماری سیستم
 

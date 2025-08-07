@@ -20,6 +20,7 @@ from config import config, States
 from database import customer_repo, subscription_repo, query_db, execute_db
 from deployment import deployment_service
 from payment import payment_service
+from admin import AdminHandlers, get_admin_callback_handler
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -54,6 +55,10 @@ class MasterBotHandlers:
             [InlineKeyboardButton("🆘 پشتیبانی", callback_data="support")]
         ]
         
+        # Add admin button for admin users
+        if AdminHandlers.is_admin(user.id):
+            keyboard.append([InlineKeyboardButton("🔧 پنل ادمین", callback_data="admin_panel")])
+        
         await update.message.reply_text(
             welcome_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -72,6 +77,13 @@ class MasterBotHandlers:
         yearly_price = config.YEARLY_PRICE
         yearly_discount = int((1 - yearly_price / (monthly_price * 12)) * 100)
         
+        # Get available payment methods
+        payment_methods = payment_service.get_available_payment_methods()
+        methods_text = ""
+        
+        for method_key, method_info in payment_methods.items():
+            methods_text += f"{method_info['icon']} {method_info['name']}\n"
+        
         pricing_text = f"""
 💰 **قیمت گذاری سرویس**
 
@@ -86,11 +98,14 @@ class MasterBotHandlers:
 • تخفیف: {yearly_discount}%
 • تمدید خودکار: خیر
 
+💳 **روش‌های پرداخت:**
+{methods_text}
+
 ✨ **ویژگی های شامل:**
 • ربات اختصاصی VPN
 • پنل مدیریت کامل
 • پشتیبانی چندین پنل Marzban  
-• سیستم پرداخت آنلاین
+• سیستم پرداخت متنوع
 • آپدیت های رایگان
 • پشتیبانی 24/7
 
@@ -253,7 +268,7 @@ class MasterBotHandlers:
     
     @staticmethod
     async def show_payment_summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Show payment summary"""
+        """Show payment summary and method selection"""
         plan_type = context.user_data.get('purchase_plan')
         price = context.user_data.get('purchase_price')
         bot_username = context.user_data.get('bot_username')
@@ -269,15 +284,23 @@ class MasterBotHandlers:
 📦 **پلن:** {"ماهانه" if plan_type == "monthly" else "سالانه"}
 💰 **مبلغ:** {price:,} تومان{channel_info}
 
-✅ همه چیز آماده است! برای پرداخت و راه‌اندازی ربات روی دکمه زیر کلیک کنید.
-
-⚡ پس از پرداخت موفق، ربات شما ظرف 2-5 دقیقه راه‌اندازی خواهد شد.
+💳 **انتخاب روش پرداخت:**
 """
         
-        keyboard = [
-            [InlineKeyboardButton("💳 پرداخت و راه‌اندازی", callback_data="proceed_payment")],
-            [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
-        ]
+        # Get available payment methods
+        payment_methods = payment_service.get_available_payment_methods()
+        keyboard = []
+        
+        for method_key, method_info in payment_methods.items():
+            instant_text = " (فوری)" if method_info['instant'] else " (دستی)"
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{method_info['icon']} {method_info['name']}{instant_text}",
+                    callback_data=f"pay_with_{method_key}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")])
         
         await update.message.reply_text(
             summary_text,
@@ -289,7 +312,7 @@ class MasterBotHandlers:
     
     @staticmethod
     async def process_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Process payment"""
+        """Process payment with selected method"""
         query = update.callback_query
         await query.answer()
         
@@ -303,6 +326,13 @@ class MasterBotHandlers:
             )
             return States.MAIN_MENU
         
+        # Extract payment method from callback data
+        if query.data.startswith("pay_with_"):
+            payment_method = query.data.replace("pay_with_", "")
+            context.user_data['payment_method'] = payment_method
+        else:
+            payment_method = context.user_data.get('payment_method', 'aqay')
+        
         user = update.effective_user
         customer = customer_repo.get_customer(user.id)
         
@@ -314,14 +344,15 @@ class MasterBotHandlers:
         payment_data = {
             'customer_id': customer['id'],
             'amount': context.user_data['purchase_price'],
+            'method': payment_method,
             'description': f"خرید ربات VPN - پلن {context.user_data['purchase_plan']}"
         }
         
-        payment_url, authority = await payment_service.create_payment(payment_data)
+        payment_url, transaction_id, payment_info = await payment_service.create_payment(payment_data)
         
-        if payment_url:
-            # Store payment info in context
-            context.user_data['payment_authority'] = authority
+        if payment_method == 'aqay' and payment_url:
+            # Aqay Payment - Online gateway
+            context.user_data['payment_transaction_id'] = transaction_id
             
             keyboard = [
                 [InlineKeyboardButton("💳 پرداخت", url=payment_url)],
@@ -330,16 +361,100 @@ class MasterBotHandlers:
             ]
             
             await query.edit_message_text(
-                "💳 **پرداخت**\n\n"
+                "🌐 **درگاه آقای پرداخت**\n\n"
                 "روی دکمه پرداخت کلیک کنید و پس از پرداخت موفق، دکمه 'پرداخت کردم' را بزنید.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode=ParseMode.MARKDOWN
             )
             
             return States.AWAIT_PAYMENT
+            
+        elif payment_method == 'card_to_card' and payment_info:
+            # Card to Card Payment
+            context.user_data['payment_transaction_id'] = transaction_id
+            
+            card_text = f"""
+💳 **پرداخت کارت به کارت**
+
+💰 **مبلغ:** {payment_info['amount']:,} تومان
+🔢 **کد پرداخت:** {payment_info['payment_code']}
+
+💳 **اطلاعات کارت:**
+**شماره کارت:** `{payment_info['card_number']}`
+**نام صاحب کارت:** {payment_info['card_name']}
+
+📝 **راهنما:**
+1️⃣ مبلغ {payment_info['amount']:,} تومان را به کارت بالا واریز کنید
+2️⃣ کد پیگیری تراکنش را یادداشت کنید  
+3️⃣ روی دکمه "✅ واریز کردم" کلیک کنید
+
+⚠️ **توجه:** پرداخت شما پس از بررسی ادمین تایید خواهد شد.
+"""
+            
+            if payment_info.get('instructions'):
+                card_text += f"\n📋 **توضیحات:** {payment_info['instructions']}"
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ واریز کردم", callback_data="verify_payment")],
+                [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
+            ]
+            
+            await query.edit_message_text(
+                card_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            return States.AWAIT_PAYMENT
+            
+        elif payment_method == 'crypto' and payment_info:
+            # Crypto Payment
+            context.user_data['payment_transaction_id'] = transaction_id
+            
+            crypto_text = f"""
+🪙 **پرداخت با رمز ارز**
+
+💰 **مبلغ:** {payment_info['toman_amount']:,} تومان
+💵 **قیمت دلار:** {payment_info['dollar_price']:,} تومان
+🔢 **کد پرداخت:** {payment_info['payment_code']}
+
+🪙 **اطلاعات کیف پول:**
+**آدرس:** `{payment_info['wallet_address']}`
+**نوع ارز:** {payment_info['crypto_type']}
+**مقدار:** {payment_info['crypto_amount']} {payment_info['crypto_type']}
+"""
+            
+            if payment_info.get('network'):
+                crypto_text += f"**شبکه:** {payment_info['network']}\n"
+            
+            crypto_text += f"""
+📝 **راهنما:**
+1️⃣ مقدار {payment_info['crypto_amount']} {payment_info['crypto_type']} را به آدرس بالا ارسال کنید
+2️⃣ Hash تراکنش را یادداشت کنید
+3️⃣ روی دکمه "✅ ارسال کردم" کلیک کنید
+
+⚠️ **توجه:** پرداخت شما پس از بررسی ادمین تایید خواهد شد.
+"""
+            
+            if payment_info.get('instructions'):
+                crypto_text += f"\n📋 **توضیحات:** {payment_info['instructions']}"
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ ارسال کردم", callback_data="verify_payment")],
+                [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
+            ]
+            
+            await query.edit_message_text(
+                crypto_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            return States.AWAIT_PAYMENT
+            
         else:
             await query.edit_message_text(
-                "❌ خطا در ایجاد لینک پرداخت. لطفا بعداً تلاش کنید."
+                "❌ خطا در ایجاد پرداخت. لطفا بعداً تلاش کنید یا روش پرداخت دیگری انتخاب کنید."
             )
             return ConversationHandler.END
     
@@ -349,13 +464,15 @@ class MasterBotHandlers:
         query = update.callback_query
         await query.answer()
         
-        authority = context.user_data.get('payment_authority')
-        if not authority:
+        transaction_id = context.user_data.get('payment_transaction_id')
+        payment_method = context.user_data.get('payment_method', 'aqay')
+        
+        if not transaction_id:
             await query.edit_message_text("❌ خطا در شناسایی پرداخت.")
             return ConversationHandler.END
         
         # Verify payment
-        verification_result = await payment_service.verify_payment(authority)
+        verification_result = await payment_service.verify_payment(transaction_id, payment_method)
         
         if verification_result['status'] == 'success':
             await query.edit_message_text(
@@ -373,6 +490,51 @@ class MasterBotHandlers:
                     "❌ خطا در راه‌اندازی ربات. لطفا با پشتیبانی تماس بگیرید."
                 )
                 return ConversationHandler.END
+                
+        elif verification_result['status'] == 'pending':
+            # Manual payment methods (card-to-card, crypto)
+            await query.edit_message_text(
+                f"""
+✅ **درخواست پرداخت ثبت شد!**
+
+🔢 **کد پرداخت:** {transaction_id}
+⏳ **وضعیت:** در انتظار تایید ادمین
+
+📝 **اطلاعات شما ثبت شده و پس از تایید پرداخت توسط ادمین، ربات شما خودکار راه‌اندازی خواهد شد.**
+
+⏰ **زمان تایید:** معمولاً کمتر از 30 دقیقه
+🔔 **اطلاع‌رسانی:** پیام تایید به شما ارسال خواهد شد
+
+💬 **پشتیبانی:** {query_db("SELECT value FROM settings WHERE key = 'support_contact'", one=True)['value'] if query_db("SELECT value FROM settings WHERE key = 'support_contact'", one=True) else '@YourSupportBot'}
+                """,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 بازگشت به منو", callback_data="main_menu")
+                ]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Send notification to admin
+            try:
+                await context.bot.send_message(
+                    chat_id=config.MASTER_ADMIN_ID,
+                    text=f"""
+🔔 **پرداخت جدید در انتظار تایید**
+
+💳 **روش:** {'کارت به کارت' if payment_method == 'card_to_card' else 'رمز ارز'}
+🔢 **کد:** {transaction_id}
+💰 **مبلغ:** {context.user_data.get('purchase_price', 0):,} تومان
+👤 **مشتری:** {update.effective_user.first_name}
+
+برای تایید به پنل ادمین مراجعه کنید: /admin
+                    """,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Failed to send admin notification: {e}")
+            
+            context.user_data.clear()
+            return States.MAIN_MENU
+            
         else:
             await query.edit_message_text(
                 f"❌ پرداخت تایید نشد: {verification_result.get('message', 'خطای نامشخص')}\n\n"
@@ -521,9 +683,12 @@ def create_master_bot_application() -> Application:
             States.AWAIT_ADMIN_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, MasterBotHandlers.receive_admin_id)],
             States.AWAIT_CHANNEL_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, MasterBotHandlers.receive_channel_info)],
             States.AWAIT_PAYMENT: [
-                CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^proceed_payment$'),
+                CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^pay_with_'),
                 CallbackQueryHandler(MasterBotHandlers.verify_payment, pattern=r'^verify_payment$'),
                 CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^cancel_purchase$')
+            ],
+            States.ADMIN_SETTINGS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, AdminHandlers.handle_admin_input)
             ]
         },
         fallbacks=[CommandHandler('start', MasterBotHandlers.start_command)]
@@ -531,11 +696,27 @@ def create_master_bot_application() -> Application:
     
     # Add handlers
     application.add_handler(CommandHandler('start', MasterBotHandlers.start_command))
+    application.add_handler(CommandHandler('admin', AdminHandlers.admin_panel))
     application.add_handler(purchase_conv)
     
     # Callback handlers
     application.add_handler(CallbackQueryHandler(MasterBotHandlers.show_pricing, pattern=r'^pricing$'))
     application.add_handler(CallbackQueryHandler(MasterBotHandlers.my_bots, pattern=r'^my_bots$'))
+    
+    # Admin callback handlers
+    def admin_callback_router(update, context):
+        """Route admin callbacks to appropriate handlers"""
+        callback_data = update.callback_query.data
+        handler = get_admin_callback_handler(callback_data)
+        if handler:
+            return handler(update, context)
+        return None
+    
+    # Add admin callback handlers
+    application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^admin_'))
+    application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^toggle_'))
+    application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^approve_payment_'))
+    application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^reject_payment_'))
     
     return application
 

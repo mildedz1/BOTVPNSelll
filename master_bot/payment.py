@@ -1,177 +1,90 @@
 # -*- coding: utf-8 -*-
 import requests
 import logging
-from typing import Dict, Tuple, Optional
+import time
+import json
+from typing import Dict, Tuple, Optional, List
 from config import config
-from database import execute_db
+from database import execute_db, query_db
 
 logger = logging.getLogger(__name__)
 
-class ZarinPalPayment:
-    """ZarinPal payment gateway integration"""
+class AqayPayment:
+    """Aqay Payment gateway integration"""
     
     def __init__(self):
-        self.merchant_id = config.ZARINPAL_MERCHANT_ID
-        self.base_url = "https://api.zarinpal.com/pg/v4/payment/"
-        self.gateway_url = "https://www.zarinpal.com/pg/StartPay/"
+        self.api_key = config.AQAY_API_KEY
+        self.base_url = config.AQAY_BASE_URL or "https://aqayepardakht.ir/api/v2"
+        self.enabled = config.AQAY_ENABLED
     
     async def create_payment(self, amount: int, description: str, callback_url: str = None) -> Tuple[Optional[str], Optional[str]]:
-        """Create payment request"""
-        if not self.merchant_id:
-            logger.error("ZarinPal merchant ID not configured")
+        """Create payment request with Aqay"""
+        if not self.enabled or not self.api_key:
             return None, None
         
         if not callback_url:
-            callback_url = "https://your-domain.com/verify"  # You should set this
+            callback_url = f"{config.SERVER_HOST}/verify/aqay"
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
         
         data = {
-            "merchant_id": self.merchant_id,
             "amount": amount,
             "description": description,
-            "callback_url": callback_url
+            "callback_url": callback_url,
+            "order_id": f"master_bot_{int(time.time())}"
         }
         
         try:
-            response = requests.post(f"{self.base_url}request.json", json=data, timeout=10)
+            response = requests.post(f"{self.base_url}/payment/request", json=data, headers=headers, timeout=15)
             response.raise_for_status()
             
             result = response.json()
             
-            if result.get("data", {}).get("code") == 100:
-                authority = result["data"]["authority"]
-                payment_url = f"{self.gateway_url}{authority}"
+            if result.get("status") == "success":
+                payment_url = result["data"]["payment_url"]
+                transaction_id = result["data"]["transaction_id"]
                 
-                logger.info(f"ZarinPal payment created: {authority}")
-                return payment_url, authority
+                logger.info(f"Aqay payment created: {transaction_id}")
+                return payment_url, transaction_id
             else:
-                logger.error(f"ZarinPal payment creation failed: {result}")
+                logger.error(f"Aqay payment creation failed: {result}")
                 return None, None
                 
         except requests.RequestException as e:
-            logger.error(f"ZarinPal request failed: {e}")
+            logger.error(f"Aqay request failed: {e}")
             return None, None
         except Exception as e:
-            logger.error(f"ZarinPal unexpected error: {e}")
+            logger.error(f"Aqay unexpected error: {e}")
             return None, None
     
-    async def verify_payment(self, authority: str, amount: int) -> Dict:
-        """Verify payment"""
-        if not self.merchant_id:
-            return {"status": "error", "message": "Merchant ID not configured"}
-        
-        data = {
-            "merchant_id": self.merchant_id,
-            "amount": amount,
-            "authority": authority
-        }
-        
-        try:
-            response = requests.post(f"{self.base_url}verify.json", json=data, timeout=10)
-            response.raise_for_status()
-            
-            result = response.json()
-            
-            if result.get("data", {}).get("code") == 100:
-                ref_id = result["data"]["ref_id"]
-                return {
-                    "status": "success",
-                    "ref_id": ref_id,
-                    "message": "Payment verified successfully"
-                }
-            elif result.get("data", {}).get("code") == 101:
-                return {
-                    "status": "success",
-                    "message": "Payment already verified"
-                }
-            else:
-                return {
-                    "status": "failed",
-                    "message": f"Verification failed: {result.get('errors', 'Unknown error')}"
-                }
-                
-        except requests.RequestException as e:
-            logger.error(f"ZarinPal verification request failed: {e}")
-            return {"status": "error", "message": "Network error during verification"}
-        except Exception as e:
-            logger.error(f"ZarinPal verification unexpected error: {e}")
-            return {"status": "error", "message": "Unexpected error during verification"}
-
-class IDPayPayment:
-    """IDPay payment gateway integration"""
-    
-    def __init__(self):
-        self.api_key = config.IDPAY_API_KEY
-        self.base_url = "https://api.idpay.ir/v1.1/payment"
-    
-    async def create_payment(self, amount: int, description: str, callback_url: str = None) -> Tuple[Optional[str], Optional[str]]:
-        """Create payment request"""
-        if not self.api_key:
-            logger.error("IDPay API key not configured")
-            return None, None
-        
-        if not callback_url:
-            callback_url = "https://your-domain.com/verify"  # You should set this
+    async def verify_payment(self, transaction_id: str) -> Dict:
+        """Verify payment with Aqay"""
+        if not self.enabled or not self.api_key:
+            return {"status": "error", "message": "Aqay not configured"}
         
         headers = {
-            "X-API-KEY": self.api_key,
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         
-        data = {
-            "order_id": f"order_{int(time.time())}",
-            "amount": amount,
-            "desc": description,
-            "callback": callback_url
-        }
-        
         try:
-            response = requests.post(self.base_url, json=data, headers=headers, timeout=10)
+            response = requests.post(
+                f"{self.base_url}/payment/verify",
+                json={"transaction_id": transaction_id},
+                headers=headers,
+                timeout=15
+            )
             response.raise_for_status()
             
             result = response.json()
             
-            if "link" in result:
-                payment_url = result["link"]
-                order_id = result["id"]
-                
-                logger.info(f"IDPay payment created: {order_id}")
-                return payment_url, order_id
-            else:
-                logger.error(f"IDPay payment creation failed: {result}")
-                return None, None
-                
-        except requests.RequestException as e:
-            logger.error(f"IDPay request failed: {e}")
-            return None, None
-        except Exception as e:
-            logger.error(f"IDPay unexpected error: {e}")
-            return None, None
-    
-    async def verify_payment(self, order_id: str) -> Dict:
-        """Verify payment"""
-        if not self.api_key:
-            return {"status": "error", "message": "API key not configured"}
-        
-        headers = {
-            "X-API-KEY": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "id": order_id,
-            "order_id": order_id
-        }
-        
-        try:
-            response = requests.post(f"{self.base_url}/verify", json=data, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            result = response.json()
-            
-            if result.get("status") == 100:  # Success
+            if result.get("status") == "success" and result.get("data", {}).get("paid"):
                 return {
                     "status": "success",
-                    "track_id": result.get("track_id"),
+                    "ref_id": result["data"]["ref_id"],
                     "message": "Payment verified successfully"
                 }
             else:
@@ -181,123 +94,312 @@ class IDPayPayment:
                 }
                 
         except requests.RequestException as e:
-            logger.error(f"IDPay verification request failed: {e}")
+            logger.error(f"Aqay verification request failed: {e}")
             return {"status": "error", "message": "Network error during verification"}
         except Exception as e:
-            logger.error(f"IDPay verification unexpected error: {e}")
+            logger.error(f"Aqay verification unexpected error: {e}")
             return {"status": "error", "message": "Unexpected error during verification"}
 
-class PaymentService:
-    """Main payment service that handles multiple payment gateways"""
+class CardToCardPayment:
+    """Card to card payment management"""
     
     def __init__(self):
-        self.zarinpal = ZarinPalPayment()
-        self.idpay = IDPayPayment()
-        
-        # Determine which gateway to use based on configuration
-        if config.ZARINPAL_MERCHANT_ID:
-            self.primary_gateway = "zarinpal"
-        elif config.IDPAY_API_KEY:
-            self.primary_gateway = "idpay"
-        else:
-            self.primary_gateway = None
-            logger.warning("No payment gateway configured")
+        self.enabled = config.CARD_TO_CARD_ENABLED
     
-    async def create_payment(self, payment_data: Dict) -> Tuple[Optional[str], Optional[str]]:
-        """Create payment using available gateway"""
-        if not self.primary_gateway:
-            logger.error("No payment gateway available")
-            return None, None
+    def get_active_cards(self) -> List[Dict]:
+        """Get list of active card numbers"""
+        if not self.enabled:
+            return []
         
-        customer_id = payment_data['customer_id']
-        amount = payment_data['amount']
-        description = payment_data.get('description', 'Payment for VPN Bot')
+        cards = query_db("""
+            SELECT * FROM payment_cards 
+            WHERE is_active = 1 
+            ORDER BY priority ASC, id ASC
+        """)
         
-        # Create payment record in database
-        payment_id = execute_db(
-            "INSERT INTO payments (customer_id, amount, payment_method, status) VALUES (?, ?, ?, ?)",
-            (customer_id, amount, self.primary_gateway, 'pending')
-        )
-        
-        if not payment_id:
-            logger.error("Failed to create payment record in database")
-            return None, None
-        
-        # Create payment with gateway
-        if self.primary_gateway == "zarinpal":
-            payment_url, authority = await self.zarinpal.create_payment(amount, description)
-            if authority:
-                # Update payment record with authority
-                execute_db(
-                    "UPDATE payments SET authority = ? WHERE id = ?",
-                    (authority, payment_id)
-                )
-                return payment_url, authority
-        
-        elif self.primary_gateway == "idpay":
-            payment_url, order_id = await self.idpay.create_payment(amount, description)
-            if order_id:
-                # Update payment record with order_id
-                execute_db(
-                    "UPDATE payments SET transaction_id = ? WHERE id = ?",
-                    (order_id, payment_id)
-                )
-                return payment_url, order_id
-        
-        # If we reach here, payment creation failed
-        execute_db(
-            "UPDATE payments SET status = ? WHERE id = ?",
-            ('failed', payment_id)
-        )
-        
-        return None, None
+        return cards or []
     
-    async def verify_payment(self, authority_or_order_id: str) -> Dict:
-        """Verify payment using appropriate gateway"""
-        if not self.primary_gateway:
-            return {"status": "error", "message": "No payment gateway available"}
+    def create_payment_request(self, amount: int, customer_id: int) -> Optional[Dict]:
+        """Create card to card payment request"""
+        if not self.enabled:
+            return None
         
-        # Get payment record from database
-        if self.primary_gateway == "zarinpal":
-            payment = query_db(
-                "SELECT * FROM payments WHERE authority = ? AND status = 'pending'",
-                (authority_or_order_id,), one=True
-            )
-        else:  # idpay
-            payment = query_db(
-                "SELECT * FROM payments WHERE transaction_id = ? AND status = 'pending'",
-                (authority_or_order_id,), one=True
-            )
+        active_cards = self.get_active_cards()
+        if not active_cards:
+            logger.error("No active cards available for card-to-card payment")
+            return None
+        
+        # Select card (round-robin or based on priority)
+        selected_card = active_cards[0]  # Simple selection, can be improved
+        
+        # Create payment record
+        payment_id = execute_db("""
+            INSERT INTO payments (customer_id, amount, payment_method, status, card_id)
+            VALUES (?, ?, 'card_to_card', 'pending', ?)
+        """, (customer_id, amount, selected_card['id']))
+        
+        if payment_id:
+            # Generate unique payment code
+            payment_code = f"C2C{payment_id:06d}"
+            
+            execute_db("""
+                UPDATE payments SET transaction_id = ? WHERE id = ?
+            """, (payment_code, payment_id))
+            
+            return {
+                'payment_id': payment_id,
+                'payment_code': payment_code,
+                'card_number': selected_card['card_number'],
+                'card_name': selected_card['card_name'],
+                'amount': amount,
+                'instructions': selected_card.get('instructions', '')
+            }
+        
+        return None
+    
+    def verify_payment(self, payment_code: str) -> Dict:
+        """Manual verification for card to card (admin confirms)"""
+        payment = query_db("""
+            SELECT p.*, c.card_number, c.card_name 
+            FROM payments p 
+            LEFT JOIN payment_cards c ON p.card_id = c.id 
+            WHERE p.transaction_id = ? AND p.payment_method = 'card_to_card'
+        """, (payment_code,), one=True)
         
         if not payment:
-            return {"status": "error", "message": "Payment record not found"}
+            return {"status": "error", "message": "Payment not found"}
         
-        # Verify with gateway
-        if self.primary_gateway == "zarinpal":
-            result = await self.zarinpal.verify_payment(authority_or_order_id, payment['amount'])
-        else:  # idpay
-            result = await self.idpay.verify_payment(authority_or_order_id)
-        
-        # Update payment status in database
-        if result['status'] == 'success':
-            execute_db(
-                "UPDATE payments SET status = ?, payment_date = CURRENT_TIMESTAMP WHERE id = ?",
-                ('paid', payment['id'])
-            )
-            
-            # Update customer total_paid
-            execute_db(
-                "UPDATE customers SET total_paid = total_paid + ? WHERE id = ?",
-                (payment['amount'], payment['customer_id'])
-            )
-            
-            logger.info(f"Payment {payment['id']} verified successfully")
+        if payment['status'] == 'paid':
+            return {"status": "success", "message": "Payment already confirmed"}
+        elif payment['status'] == 'pending':
+            return {"status": "pending", "message": "Payment pending admin confirmation"}
         else:
-            execute_db(
-                "UPDATE payments SET status = ? WHERE id = ?",
-                ('failed', payment['id'])
-            )
-            logger.warning(f"Payment {payment['id']} verification failed")
+            return {"status": "failed", "message": "Payment failed or cancelled"}
+
+class CryptoPayment:
+    """Cryptocurrency payment management"""
+    
+    def __init__(self):
+        self.enabled = config.CRYPTO_ENABLED
+        self.dollar_price = self.get_dollar_price()
+    
+    def get_dollar_price(self) -> float:
+        """Get current dollar price set by admin"""
+        price_setting = query_db("""
+            SELECT value FROM settings WHERE key = 'dollar_price'
+        """, one=True)
+        
+        if price_setting:
+            try:
+                return float(price_setting['value'])
+            except ValueError:
+                pass
+        
+        return config.DEFAULT_DOLLAR_PRICE or 50000.0  # Default fallback
+    
+    def get_active_wallets(self) -> List[Dict]:
+        """Get list of active crypto wallets"""
+        if not self.enabled:
+            return []
+        
+        wallets = query_db("""
+            SELECT * FROM crypto_wallets 
+            WHERE is_active = 1 
+            ORDER BY priority ASC, id ASC
+        """)
+        
+        return wallets or []
+    
+    def calculate_crypto_amount(self, toman_amount: int, crypto_type: str) -> float:
+        """Calculate crypto amount based on toman amount"""
+        # Convert toman to dollar
+        dollar_amount = toman_amount / self.dollar_price
+        
+        # For now, assume 1:1 USD to crypto (can be improved with real-time rates)
+        # You can add specific rates for different cryptocurrencies
+        crypto_rates = {
+            'USDT': 1.0,
+            'BTC': 0.000025,  # Example rate
+            'ETH': 0.0004,    # Example rate
+            'TRX': 15.0       # Example rate
+        }
+        
+        rate = crypto_rates.get(crypto_type.upper(), 1.0)
+        return dollar_amount * rate
+    
+    def create_payment_request(self, amount: int, customer_id: int, crypto_type: str = None) -> Optional[Dict]:
+        """Create crypto payment request"""
+        if not self.enabled:
+            return None
+        
+        active_wallets = self.get_active_wallets()
+        if not active_wallets:
+            logger.error("No active crypto wallets available")
+            return None
+        
+        # Filter by crypto type if specified
+        if crypto_type:
+            active_wallets = [w for w in active_wallets if w['crypto_type'].upper() == crypto_type.upper()]
+            if not active_wallets:
+                logger.error(f"No active {crypto_type} wallets available")
+                return None
+        
+        # Select wallet
+        selected_wallet = active_wallets[0]
+        crypto_amount = self.calculate_crypto_amount(amount, selected_wallet['crypto_type'])
+        
+        # Create payment record
+        payment_id = execute_db("""
+            INSERT INTO payments (customer_id, amount, payment_method, status, wallet_id, crypto_amount)
+            VALUES (?, ?, 'crypto', 'pending', ?, ?)
+        """, (customer_id, amount, selected_wallet['id'], crypto_amount))
+        
+        if payment_id:
+            payment_code = f"CRYPTO{payment_id:06d}"
+            
+            execute_db("""
+                UPDATE payments SET transaction_id = ? WHERE id = ?
+            """, (payment_code, payment_id))
+            
+            return {
+                'payment_id': payment_id,
+                'payment_code': payment_code,
+                'wallet_address': selected_wallet['wallet_address'],
+                'crypto_type': selected_wallet['crypto_type'],
+                'crypto_amount': crypto_amount,
+                'toman_amount': amount,
+                'dollar_price': self.dollar_price,
+                'network': selected_wallet.get('network', ''),
+                'instructions': selected_wallet.get('instructions', '')
+            }
+        
+        return None
+    
+    def verify_payment(self, payment_code: str) -> Dict:
+        """Manual verification for crypto (admin confirms)"""
+        payment = query_db("""
+            SELECT p.*, w.wallet_address, w.crypto_type, w.network 
+            FROM payments p 
+            LEFT JOIN crypto_wallets w ON p.wallet_id = w.id 
+            WHERE p.transaction_id = ? AND p.payment_method = 'crypto'
+        """, (payment_code,), one=True)
+        
+        if not payment:
+            return {"status": "error", "message": "Payment not found"}
+        
+        if payment['status'] == 'paid':
+            return {"status": "success", "message": "Payment already confirmed"}
+        elif payment['status'] == 'pending':
+            return {"status": "pending", "message": "Payment pending admin confirmation"}
+        else:
+            return {"status": "failed", "message": "Payment failed or cancelled"}
+
+class PaymentService:
+    """Enhanced payment service with multiple payment methods"""
+    
+    def __init__(self):
+        self.aqay = AqayPayment()
+        self.card_to_card = CardToCardPayment()
+        self.crypto = CryptoPayment()
+    
+    def get_available_payment_methods(self) -> Dict:
+        """Get list of available payment methods"""
+        methods = {}
+        
+        if self.aqay.enabled and self.aqay.api_key:
+            methods['aqay'] = {
+                'name': 'درگاه آقای پرداخت',
+                'icon': '🌐',
+                'description': 'پرداخت آنلاین با کارت بانکی',
+                'instant': True
+            }
+        
+        if self.card_to_card.enabled and self.card_to_card.get_active_cards():
+            methods['card_to_card'] = {
+                'name': 'کارت به کارت',
+                'icon': '💳',
+                'description': 'انتقال وجه مستقیم به کارت',
+                'instant': False
+            }
+        
+        if self.crypto.enabled and self.crypto.get_active_wallets():
+            methods['crypto'] = {
+                'name': 'رمز ارز',
+                'icon': '🪙',
+                'description': 'پرداخت با ارز دیجیتال',
+                'instant': False
+            }
+        
+        return methods
+    
+    async def create_payment(self, payment_data: Dict) -> Tuple[Optional[str], Optional[str], Optional[Dict]]:
+        """Create payment using specified method"""
+        customer_id = payment_data['customer_id']
+        amount = payment_data['amount']
+        method = payment_data.get('method', 'aqay')
+        description = payment_data.get('description', 'Payment for VPN Bot')
+        
+        if method == 'aqay':
+            payment_url, transaction_id = await self.aqay.create_payment(amount, description)
+            if payment_url:
+                # Update payment record with transaction_id
+                execute_db("""
+                    INSERT INTO payments (customer_id, amount, payment_method, status, transaction_id)
+                    VALUES (?, ?, 'aqay', 'pending', ?)
+                """, (customer_id, amount, transaction_id))
+                return payment_url, transaction_id, None
+        
+        elif method == 'card_to_card':
+            payment_info = self.card_to_card.create_payment_request(amount, customer_id)
+            if payment_info:
+                return None, payment_info['payment_code'], payment_info
+        
+        elif method == 'crypto':
+            crypto_type = payment_data.get('crypto_type')
+            payment_info = self.crypto.create_payment_request(amount, customer_id, crypto_type)
+            if payment_info:
+                return None, payment_info['payment_code'], payment_info
+        
+        return None, None, None
+    
+    async def verify_payment(self, transaction_id: str, method: str = None) -> Dict:
+        """Verify payment using appropriate method"""
+        if not method:
+            # Auto-detect method from transaction_id
+            if transaction_id.startswith('C2C'):
+                method = 'card_to_card'
+            elif transaction_id.startswith('CRYPTO'):
+                method = 'crypto'
+            else:
+                method = 'aqay'
+        
+        if method == 'aqay':
+            result = await self.aqay.verify_payment(transaction_id)
+        elif method == 'card_to_card':
+            result = self.card_to_card.verify_payment(transaction_id)
+        elif method == 'crypto':
+            result = self.crypto.verify_payment(transaction_id)
+        else:
+            return {"status": "error", "message": "Unknown payment method"}
+        
+        # Update payment status in database if successful
+        if result.get('status') == 'success':
+            payment = query_db("""
+                SELECT * FROM payments WHERE transaction_id = ? OR authority = ?
+            """, (transaction_id, transaction_id), one=True)
+            
+            if payment:
+                execute_db("""
+                    UPDATE payments SET status = 'paid', payment_date = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (payment['id'],))
+                
+                # Update customer total_paid
+                execute_db("""
+                    UPDATE customers SET total_paid = total_paid + ? WHERE id = ?
+                """, (payment['amount'], payment['customer_id']))
+                
+                logger.info(f"Payment {payment['id']} verified successfully via {method}")
         
         return result
     
@@ -305,16 +407,25 @@ class PaymentService:
         """Get payment status from database"""
         return query_db("SELECT * FROM payments WHERE id = ?", (payment_id,), one=True)
     
-    def get_customer_payments(self, customer_id: int) -> list:
+    def get_customer_payments(self, customer_id: int) -> List[Dict]:
         """Get all payments for a customer"""
-        return query_db(
-            "SELECT * FROM payments WHERE customer_id = ? ORDER BY created_at DESC",
-            (customer_id,)
-        )
+        return query_db("""
+            SELECT * FROM payments WHERE customer_id = ? ORDER BY created_at DESC
+        """, (customer_id,))
+    
+    def get_pending_payments(self) -> List[Dict]:
+        """Get all pending manual payments (card-to-card and crypto)"""
+        return query_db("""
+            SELECT p.*, c.first_name, c.username, c.user_id,
+                   pc.card_number, pc.card_name,
+                   cw.wallet_address, cw.crypto_type, p.crypto_amount
+            FROM payments p
+            LEFT JOIN customers c ON p.customer_id = c.id
+            LEFT JOIN payment_cards pc ON p.card_id = pc.id
+            LEFT JOIN crypto_wallets cw ON p.wallet_id = cw.id
+            WHERE p.status = 'pending' AND p.payment_method IN ('card_to_card', 'crypto')
+            ORDER BY p.created_at ASC
+        """)
 
 # Initialize payment service
 payment_service = PaymentService()
-
-# Import time for order_id generation
-import time
-from database import query_db
