@@ -418,7 +418,8 @@ class PaymentService:
         return query_db("""
             SELECT p.*, c.first_name, c.username, c.user_id,
                    pc.card_number, pc.card_name,
-                   cw.wallet_address, cw.crypto_type, p.crypto_amount
+                   cw.wallet_address, cw.crypto_type, p.crypto_amount,
+                   p.screenshot_file_id, p.screenshot_caption
             FROM payments p
             LEFT JOIN customers c ON p.customer_id = c.id
             LEFT JOIN payment_cards pc ON p.card_id = pc.id

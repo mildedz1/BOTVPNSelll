@@ -90,6 +90,8 @@ class MasterDatabase:
                     card_id INTEGER,
                     wallet_id INTEGER,
                     crypto_amount REAL,
+                    screenshot_file_id TEXT,
+                    screenshot_caption TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (customer_id) REFERENCES customers(id),
                     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),

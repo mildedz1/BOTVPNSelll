@@ -395,7 +395,7 @@ class MasterBotHandlers:
                 card_text += f"\n📋 **توضیحات:** {payment_info['instructions']}"
             
             keyboard = [
-                [InlineKeyboardButton("✅ واریز کردم", callback_data="verify_payment")],
+                [InlineKeyboardButton("✅ واریز کردم", callback_data="upload_screenshot")],
                 [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
             ]
             
@@ -440,7 +440,7 @@ class MasterBotHandlers:
                 crypto_text += f"\n📋 **توضیحات:** {payment_info['instructions']}"
             
             keyboard = [
-                [InlineKeyboardButton("✅ ارسال کردم", callback_data="verify_payment")],
+                [InlineKeyboardButton("✅ ارسال کردم", callback_data="upload_screenshot")],
                 [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
             ]
             
@@ -457,6 +457,174 @@ class MasterBotHandlers:
                 "❌ خطا در ایجاد پرداخت. لطفا بعداً تلاش کنید یا روش پرداخت دیگری انتخاب کنید."
             )
             return ConversationHandler.END
+    
+    @staticmethod
+    async def request_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Request transaction screenshot from user"""
+        query = update.callback_query
+        await query.answer()
+        
+        payment_method = context.user_data.get('payment_method')
+        
+        if payment_method == 'card_to_card':
+            screenshot_text = """
+📸 **ارسال رسید تراکنش**
+
+لطفا اسکرین‌شات رسید واریز خود را ارسال کنید:
+
+📝 **راهنما:**
+• عکس باید واضح و خوانا باشد
+• تمام اطلاعات تراکنش باید مشخص باشه
+• مبلغ و تاریخ/زمان واریز باید دیده بشه
+• می‌توانید توضیحات اضافی هم بنویسید
+
+⏰ **زمان تایید:** کمتر از 30 دقیقه
+"""
+        else:  # crypto
+            screenshot_text = """
+📸 **ارسال رسید تراکنش**
+
+لطفا اسکرین‌شات تراکنش رمز ارز خود را ارسال کنید:
+
+📝 **راهنما:**
+• عکس باید واضح و خوانا باشد
+• Hash تراکنش باید مشخص باشه
+• مقدار و آدرس گیرنده باید دیده بشه
+• وضعیت تایید شبکه نمایش داده شده باشه
+• می‌توانید Hash تراکنش را هم بنویسید
+
+⏰ **زمان تایید:** کمتر از 30 دقیقه
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("❌ لغو", callback_data="cancel_purchase")]
+        ]
+        
+        await query.edit_message_text(
+            screenshot_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        return States.AWAIT_TRANSACTION_SCREENSHOT
+    
+    @staticmethod
+    async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Receive and process transaction screenshot"""
+        user = update.effective_user
+        transaction_id = context.user_data.get('payment_transaction_id')
+        payment_method = context.user_data.get('payment_method')
+        
+        if not transaction_id:
+            await update.message.reply_text("❌ خطا در شناسایی پرداخت.")
+            return ConversationHandler.END
+        
+        screenshot_file_id = None
+        screenshot_caption = ""
+        
+        # Get screenshot file_id
+        if update.message.photo:
+            # Get the highest resolution photo
+            screenshot_file_id = update.message.photo[-1].file_id
+            screenshot_caption = update.message.caption or ""
+        elif update.message.document:
+            # Handle document (image files sent as document)
+            if update.message.document.mime_type and update.message.document.mime_type.startswith('image/'):
+                screenshot_file_id = update.message.document.file_id
+                screenshot_caption = update.message.caption or ""
+            else:
+                await update.message.reply_text(
+                    "❌ لطفا فقط عکس ارسال کنید.\n"
+                    "فرمت‌های مجاز: JPG, PNG"
+                )
+                return States.AWAIT_TRANSACTION_SCREENSHOT
+        else:
+            await update.message.reply_text(
+                "❌ لطفا اسکرین‌شات تراکنش خود را ارسال کنید.\n"
+                "می‌توانید عکس را مستقیم ارسال کنید یا به عنوان فایل."
+            )
+            return States.AWAIT_TRANSACTION_SCREENSHOT
+        
+        # Update payment record with screenshot info
+        execute_db("""
+            UPDATE payments 
+            SET screenshot_file_id = ?, screenshot_caption = ?
+            WHERE transaction_id = ?
+        """, (screenshot_file_id, screenshot_caption, transaction_id))
+        
+        # Send confirmation to user
+        await update.message.reply_text(
+            f"""
+✅ **رسید تراکنش دریافت شد!**
+
+🔢 **کد پرداخت:** {transaction_id}
+📸 **رسید:** ✅ دریافت شد
+⏳ **وضعیت:** در انتظار تایید ادمین
+
+📝 **اطلاعات شما ثبت شده و پس از بررسی رسید توسط ادمین، پرداخت تایید و ربات شما راه‌اندازی خواهد شد.**
+
+⏰ **زمان تایید:** معمولاً کمتر از 30 دقیقه
+🔔 **اطلاع‌رسانی:** پیام تایید به شما ارسال خواهد شد
+
+💬 **پشتیبانی:** {query_db("SELECT value FROM settings WHERE key = 'support_contact'", one=True)['value'] if query_db("SELECT value FROM settings WHERE key = 'support_contact'", one=True) else '@YourSupportBot'}
+            """,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 بازگشت به منو", callback_data="main_menu")
+            ]]),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Send notification to admin with screenshot
+        try:
+            payment_method_text = "💳 کارت به کارت" if payment_method == 'card_to_card' else "🪙 رمز ارز"
+            
+            admin_text = f"""
+🔔 **پرداخت جدید با رسید**
+
+💳 **روش:** {payment_method_text}
+🔢 **کد:** {transaction_id}
+💰 **مبلغ:** {context.user_data.get('purchase_price', 0):,} تومان
+👤 **مشتری:** {user.first_name} (@{user.username if user.username else 'بدون نام کاربری'})
+📱 **آیدی:** {user.id}
+
+📸 **رسید تراکنش در پیام بعدی ارسال می‌شود**
+
+برای تایید/رد: /admin
+            """
+            
+            await context.bot.send_message(
+                chat_id=config.MASTER_ADMIN_ID,
+                text=admin_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Send the screenshot to admin
+            if screenshot_file_id:
+                caption = f"""
+📸 **رسید پرداخت {transaction_id}**
+
+👤 **مشتری:** {user.first_name}
+💰 **مبلغ:** {context.user_data.get('purchase_price', 0):,} تومان
+
+📝 **توضیحات مشتری:**
+{screenshot_caption if screenshot_caption else 'بدون توضیحات'}
+
+✅ **تایید:** /admin → تایید پرداخت‌ها
+                """
+                
+                await context.bot.send_photo(
+                    chat_id=config.MASTER_ADMIN_ID,
+                    photo=screenshot_file_id,
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            
+        except Exception as e:
+            logger.error(f"Failed to send admin notification with screenshot: {e}")
+        
+        # Clear user data
+        context.user_data.clear()
+        return States.MAIN_MENU
     
     @staticmethod
     async def verify_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -685,10 +853,15 @@ def create_master_bot_application() -> Application:
             States.AWAIT_PAYMENT: [
                 CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^pay_with_'),
                 CallbackQueryHandler(MasterBotHandlers.verify_payment, pattern=r'^verify_payment$'),
+                CallbackQueryHandler(MasterBotHandlers.request_screenshot, pattern=r'^upload_screenshot$'),
                 CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^cancel_purchase$')
             ],
             States.ADMIN_SETTINGS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, AdminHandlers.handle_admin_input)
+            ],
+            States.AWAIT_TRANSACTION_SCREENSHOT: [
+                MessageHandler(filters.PHOTO | filters.Document.IMAGE, MasterBotHandlers.receive_screenshot),
+                CallbackQueryHandler(MasterBotHandlers.process_payment, pattern=r'^cancel_purchase$')
             ]
         },
         fallbacks=[CommandHandler('start', MasterBotHandlers.start_command)]
@@ -717,6 +890,7 @@ def create_master_bot_application() -> Application:
     application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^toggle_'))
     application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^approve_payment_'))
     application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^reject_payment_'))
+    application.add_handler(CallbackQueryHandler(admin_callback_router, pattern=r'^view_screenshot_'))
     
     return application
 

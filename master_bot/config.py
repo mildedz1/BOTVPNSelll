@@ -106,7 +106,10 @@ class States:
         
         # Admin States
         ADMIN_SETTINGS,
-    ) = range(16)
+        
+        # Transaction Screenshot States
+        AWAIT_TRANSACTION_SCREENSHOT,
+    ) = range(17)
 
 # Initialize configuration
 config = MasterConfig()

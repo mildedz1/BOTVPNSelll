@@ -256,12 +256,30 @@ class AdminHandlers:
                     text += f"🪙 **رمز ارز:** {payment['crypto_amount']} {payment['crypto_type']}\n"
                     text += f"🏦 **کیف پول:** {payment['wallet_address'][:20]}...\n"
                 
-                text += f"📅 **تاریخ:** {payment['created_at'][:16]}\n\n"
+                text += f"📅 **تاریخ:** {payment['created_at'][:16]}\n"
                 
-                keyboard.append([
-                    InlineKeyboardButton(f"✅ تایید {payment['transaction_id']}", callback_data=f"approve_payment_{payment['id']}"),
-                    InlineKeyboardButton(f"❌ رد {payment['transaction_id']}", callback_data=f"reject_payment_{payment['id']}")
-                ])
+                # Show screenshot status
+                if payment['screenshot_file_id']:
+                    text += f"📸 **رسید:** ✅ دریافت شده\n"
+                    if payment['screenshot_caption']:
+                        text += f"📝 **توضیحات:** {payment['screenshot_caption'][:50]}{'...' if len(payment['screenshot_caption']) > 50 else ''}\n"
+                else:
+                    text += f"📸 **رسید:** ❌ ارسال نشده\n"
+                
+                text += "\n"
+                
+                # Add buttons for approve/reject and view screenshot
+                buttons_row = [
+                    InlineKeyboardButton(f"✅ تایید", callback_data=f"approve_payment_{payment['id']}"),
+                    InlineKeyboardButton(f"❌ رد", callback_data=f"reject_payment_{payment['id']}")
+                ]
+                
+                if payment['screenshot_file_id']:
+                    buttons_row.append(
+                        InlineKeyboardButton(f"📸 رسید", callback_data=f"view_screenshot_{payment['id']}")
+                    )
+                
+                keyboard.append(buttons_row)
             
             if len(pending_payments) > 10:
                 keyboard.append([InlineKeyboardButton("📄 مشاهده بیشتر", callback_data="more_payments")])
@@ -379,6 +397,87 @@ class AdminHandlers:
             await query.edit_message_text("❌ خطا در رد پرداخت.")
     
     @staticmethod
+    async def view_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """View payment screenshot"""
+        query = update.callback_query
+        await query.answer()
+        
+        payment_id = int(query.data.split('_')[-1])
+        
+        # Get payment with screenshot info
+        payment = query_db("""
+            SELECT p.*, c.first_name, c.username, c.user_id,
+                   pc.card_number, pc.card_name,
+                   cw.wallet_address, cw.crypto_type, p.crypto_amount,
+                   p.screenshot_file_id, p.screenshot_caption
+            FROM payments p
+            LEFT JOIN customers c ON p.customer_id = c.id
+            LEFT JOIN payment_cards pc ON p.card_id = pc.id
+            LEFT JOIN crypto_wallets cw ON p.wallet_id = cw.id
+            WHERE p.id = ?
+        """, (payment_id,), one=True)
+        
+        if not payment:
+            await query.edit_message_text("❌ پرداخت یافت نشد.")
+            return
+        
+        if not payment['screenshot_file_id']:
+            await query.edit_message_text("❌ رسید تراکنش ارسال نشده است.")
+            return
+        
+        try:
+            # Prepare payment details
+            method_text = "💳 کارت به کارت" if payment['payment_method'] == 'card_to_card' else "🪙 رمز ارز"
+            
+            caption = f"""
+📸 **رسید پرداخت {payment['transaction_id']}**
+
+💳 **روش:** {method_text}
+👤 **مشتری:** {payment['first_name']} (@{payment['username'] if payment['username'] else 'بدون نام کاربری'})
+📱 **آیدی:** {payment['user_id']}
+💰 **مبلغ:** {payment['amount']:,} تومان
+📅 **تاریخ:** {payment['created_at'][:16]}
+
+📝 **توضیحات مشتری:**
+{payment['screenshot_caption'] if payment['screenshot_caption'] else 'بدون توضیحات'}
+
+✅ **تایید:** دکمه تایید در زیر
+❌ **رد:** دکمه رد در زیر
+            """
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"approve_payment_{payment['id']}"),
+                    InlineKeyboardButton("❌ رد پرداخت", callback_data=f"reject_payment_{payment['id']}")
+                ],
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_verify_payments")]
+            ]
+            
+            # Send the screenshot with details
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=payment['screenshot_file_id'],
+                caption=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Delete the original message
+            await query.delete_message()
+            
+        except Exception as e:
+            logger.error(f"Failed to show screenshot: {e}")
+            await query.edit_message_text(
+                f"❌ خطا در نمایش رسید.\n\nجزئیات پرداخت:\n"
+                f"کد: {payment['transaction_id']}\n"
+                f"مشتری: {payment['first_name']}\n"
+                f"مبلغ: {payment['amount']:,} تومان",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 بازگشت", callback_data="admin_verify_payments")
+                ]])
+            )
+    
+    @staticmethod
     async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle admin text inputs"""
         if not AdminHandlers.is_admin(update.effective_user.id):
@@ -471,5 +570,7 @@ def get_admin_callback_handler(callback_data: str):
         return AdminHandlers.approve_payment
     elif callback_data.startswith('reject_payment_'):
         return AdminHandlers.reject_payment
+    elif callback_data.startswith('view_screenshot_'):
+        return AdminHandlers.view_screenshot
     else:
         return None
