@@ -1,0 +1,16 @@
+# Core Telegram Bot Framework
+python-telegram-bot>=20.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# Docker Integration
+docker>=6.0.0
+
+# SSH for remote deployment
+paramiko>=3.0.0
+
+# Note: sqlite3 and uuid are built-in Python modules
